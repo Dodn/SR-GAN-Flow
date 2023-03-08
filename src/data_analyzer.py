@@ -38,7 +38,7 @@ if __name__ == "__main__":
     valdh = PatchHandler3D(data_dir, patch_size, res_increase, batch_size, mask_threshold)
     valset = valdh.initialize_dataset(valset, shuffle=False, n_parallel=None)
 
-    n_bins = 100
+    n_bins = 1000
 
     cov = 0
     i = 0
@@ -48,7 +48,7 @@ if __name__ == "__main__":
     w_dist = np.zeros(n_bins, dtype=np.int32)
     s_dist = np.zeros(n_bins, dtype=np.int32)
 
-    for i, (data_pairs) in enumerate(trainset):
+    for i, (data_pairs) in enumerate(valset):
         u, v, w, u_mag, v_mag, w_mag, u_hr, v_hr, w_hr, venc, mask = data_pairs # LR-shape (12,12,12) , HR+mask-shape (24,24,24)
 
         coverage = np.sum(mask)/np.size(mask)
@@ -87,10 +87,11 @@ if __name__ == "__main__":
 
     print(cov/(i+1))
     
-    print(f'u distribution \n{u_dist}')
-    print(f'v distribution \n{v_dist}')
-    print(f'w distribution \n{w_dist}')
-    print(f's distribution \n{s_dist}')
+    # print(f'u distribution \n{u_dist}')
+    # print(f'v distribution \n{v_dist}')
+    # print(f'w distribution \n{w_dist}')
+    # print(f's distribution \n{s_dist}')
+
     #print(u_dist/np.sum(u_dist))
 
     fig, ax = plt.subplots(2, 3)

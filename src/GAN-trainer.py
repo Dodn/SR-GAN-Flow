@@ -25,13 +25,13 @@ if __name__ == "__main__":
         model_file = "4DFlowGAN-best.h5"
 
     # Hyperparameters optimisation variables
-    initial_learning_rate = 3e-4 # def 2e-4
-    epochs =  60 # def 60
+    initial_learning_rate = 2e-4 # def 2e-4
+    epochs =  100 # def 60
     batch_size = 20 # def 20
     mask_threshold = 0.6 # def 0.6
 
     # Network setting
-    network_name = '4DFlowGAN_minitest'
+    network_name = '4DFlowGAN'
     patch_size = 12 # def 16
     res_increase = 2 # def 2
     # Residual blocks, default (8 LR ResBlocks and 4 HR ResBlocks)
@@ -45,7 +45,7 @@ if __name__ == "__main__":
     # ----------------- TensorFlow stuff -------------------
     # TRAIN dataset iterator
     z = PatchHandler3D(data_dir, patch_size, res_increase, batch_size, mask_threshold)
-    trainset = z.initialize_dataset(trainset, shuffle=True, n_parallel=None, reduction_factor=4)
+    trainset = z.initialize_dataset(trainset, shuffle=True, n_parallel=None, reduction_factor=1)
 
     # VALIDATION iterator
     valdh = PatchHandler3D(data_dir, patch_size, res_increase, batch_size, mask_threshold)
@@ -64,6 +64,10 @@ if __name__ == "__main__":
     print(f"4DFlowGAN Patch {patch_size}, lr {initial_learning_rate}, batch {batch_size}")
     network = TrainerController(patch_size, res_increase, initial_learning_rate, QUICKSAVE, network_name, low_resblock, hi_resblock)
     network.init_model_dir()
+
+    print(network.model.summary())
+    print(network.generator.summary())
+    print(network.discriminator.summary())
 
     if restore:
         print(f"Restoring model {model_file}...")

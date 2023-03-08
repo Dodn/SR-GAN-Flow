@@ -22,9 +22,7 @@ class TrainerController:
         """
         self.div_weight = 0 # Weighting for divergence loss
         self.non_fluid_weight = 1.0 # Weigthing for non fluid region
-        self.disc_loss_weight = 0.00001
-
-        self.mask_for_disc = True # Apply mask to SR field before being passed to the discriminator
+        self.disc_loss_weight = 0.0002
 
         # General param
         self.res_increase = res_increase
@@ -52,8 +50,8 @@ class TrainerController:
         # w_hr = tf.keras.layers.Input(shape=output_shape, name='w_hr')
 
         net = SR4DFlowGAN(patch_size, res_increase)
-        self.generator = net.build_generator(low_resblock, hi_resblock, channel_nr=64)
-        self.discriminator = net.build_disriminator(channel_nr=8)
+        self.generator = net.build_generator(low_resblock, hi_resblock, channel_nr=96)
+        self.discriminator = net.build_disriminator()
         self.model = net.build_network(self.generator, self.discriminator)
 
         # ===== Metrics =====
@@ -239,12 +237,11 @@ class TrainerController:
             # behavior during training versus inference (e.g. Dropout).
             input_data = tf.concat([u,v,w], axis=-1)
             x_pred = self.generator(input_data, training=True)
-            x_pred_p = x_pred * tf.expand_dims(mask, -1) if self.mask_for_disc else x_pred
 
             self.discriminator.trainable = True
             with tf.GradientTape() as disc_tape:
                 real_y_pred = self.discriminator(x_target, training=True)
-                fake_y_pred = self.discriminator(x_pred_p, training=True)
+                fake_y_pred = self.discriminator(x_pred, training=True)
                 real_y_target = np.ones(fake_y_pred.shape)
                 fake_y_target = np.zeros(fake_y_pred.shape)
 
@@ -269,9 +266,7 @@ class TrainerController:
         # training=False is only needed if there are layers with different
         # behavior during training versus inference (e.g. Dropout).
         input_data = tf.concat([u,v,w], axis=-1)
-        x_pred = self.generator(input_data, training=False)
-        x_pred_p = x_pred * tf.expand_dims(mask, -1) if self.mask_for_disc else x_pred
-        fake_y_pred = self.discriminator(x_pred_p, training=False)
+        x_pred, fake_y_pred = self.model(input_data, training=False)
 
         real_y_target = np.ones(fake_y_pred.shape)
         fake_y_target = np.zeros(fake_y_pred.shape)

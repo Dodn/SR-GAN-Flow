@@ -10,39 +10,39 @@ from utils.ImageDataset import ImageDataset
 
 def prepare_network(patch_size, res_increase, low_resblock, hi_resblock):
     # Prepare input
-    input_shape = (patch_size,patch_size,patch_size,1)
-    output_shape = (res_increase*patch_size,res_increase*patch_size,res_increase*patch_size)
+    # input_shape = (patch_size,patch_size,patch_size,1)
+    # output_shape = (res_increase*patch_size,res_increase*patch_size,res_increase*patch_size,1)
 
-    u = tf.keras.layers.Input(shape=input_shape, name='u')
-    v = tf.keras.layers.Input(shape=input_shape, name='v')
-    w = tf.keras.layers.Input(shape=input_shape, name='w')
+    # u = tf.keras.layers.Input(shape=input_shape, name='u')
+    # v = tf.keras.layers.Input(shape=input_shape, name='v')
+    # w = tf.keras.layers.Input(shape=input_shape, name='w')
 
     # u_mag = tf.keras.layers.Input(shape=input_shape, name='u_mag')
     # v_mag = tf.keras.layers.Input(shape=input_shape, name='v_mag')
     # w_mag = tf.keras.layers.Input(shape=input_shape, name='w_mag')
 
-    u_hr = tf.keras.layers.Input(shape=output_shape, name='u_hr')
-    v_hr = tf.keras.layers.Input(shape=output_shape, name='v_hr')
-    w_hr = tf.keras.layers.Input(shape=output_shape, name='w_hr')
+    # u_hr = tf.keras.layers.Input(shape=output_shape, name='u_hr')
+    # v_hr = tf.keras.layers.Input(shape=output_shape, name='v_hr')
+    # w_hr = tf.keras.layers.Input(shape=output_shape, name='w_hr')
 
-    input_layer = [u,v,w]
+    # input_layer = [u,v,w]
 
     # network & output
     net = SR4DFlowGAN(patch_size, res_increase)
-    generator = net.build_generator(u, v, w, low_resblock, hi_resblock)
-    discriminator = net.build_disriminator(u_hr, v_hr, w_hr)
-    model = net.build_network(u, v, w, generator, discriminator)
+    generator = net.build_generator(low_resblock, hi_resblock, channel_nr=64)
+    discriminator = net.build_disriminator(channel_nr=32)
+    model = net.build_network(generator, discriminator)
 
-    return model
+    return model, generator
 
 if __name__ == '__main__':
     data_dir = '../../data/cerebro_data'
-    filename = 'patient1-075_LR.h5'
+    filename = 'patient3-postOp-0375_LR.h5'
  
-    output_dir = "../predictions"
-    output_filename = 'patient1-075_PR.h5'
+    output_dir = "../predictions/GAN_test2"
+    output_filename = 'patient3-postOp-0375_SR.h5'
     
-    model_path = "../models/4DFlowGAN_minitest_20230216-0059/4DFlowGAN_minitest-best.h5"
+    model_path = "../models/4DFlowGAN_20230306-2035/4DFlowGAN-best.h5"
     # Params
     patch_size = 12 #24
     res_increase = 2
@@ -64,7 +64,7 @@ if __name__ == '__main__':
 
     print(f"Loading 4DFlowNet: {res_increase}x upsample")
     # Load the network
-    network = prepare_network(patch_size, res_increase, low_resblock, hi_resblock)
+    network, generator = prepare_network(patch_size, res_increase, low_resblock, hi_resblock)
     network.load_weights(model_path)
 
     if not os.path.isdir(output_dir):
@@ -83,8 +83,7 @@ if __name__ == '__main__':
         print(f"Patchified. Nr of patches: {data_size} - {velocities[0].shape}")
 
         # Predict the patches
-        #results = np.zeros((0,patch_size*res_increase, patch_size*res_increase, patch_size*res_increase, 3))
-        results = np.zeros((0,patch_size*res_increase, patch_size*res_increase, patch_size*res_increase))
+        results = np.zeros((0,patch_size*res_increase, patch_size*res_increase, patch_size*res_increase, 3))
         start_time = time.time()
 
         for current_idx in range(0, data_size, batch_size):
@@ -92,24 +91,18 @@ if __name__ == '__main__':
             print(f"\rProcessed {current_idx}/{data_size} Elapsed: {time_taken:.2f} secs.", end='\r')
             # Prepare the batch to predict
             patch_index = np.index_exp[current_idx:current_idx+batch_size]
-            # sr_images = network.predict([velocities[0][patch_index],
-            #                         velocities[1][patch_index],
-            #                         velocities[2][patch_index],
-            #                         magnitudes[0][patch_index],
-            #                         magnitudes[1][patch_index],
-            #                         magnitudes[2][patch_index]])
-            sr_images = network.predict(velocities[0][patch_index])
+            input_data = np.concatenate([velocities[0][patch_index],
+                                    velocities[1][patch_index],
+                                    velocities[2][patch_index]], axis=-1)
+            sr_images = generator.predict(input_data)
 
-            # results = np.append(results, sr_images, axis=0)
-            results = np.append(results, sr_images[0], axis=0)
+            results = np.append(results, sr_images, axis=0)
         # End of batch loop    
         time_taken = time.time() - start_time
         print(f"\rProcessed {data_size}/{data_size} Elapsed: {time_taken:.2f} secs.")
 
-        #for i in range(0,3):
-        for i in range(0,1):
-            # v = pgen._patchup_with_overlap(results[:,:,:,:,i], pgen.nr_x, pgen.nr_y, pgen.nr_z)
-            v = pgen._patchup_with_overlap(results[:,:,:,:], pgen.nr_x, pgen.nr_y, pgen.nr_z)
+        for i in range(0,3):
+            v = pgen._patchup_with_overlap(results[:,:,:,:,i], pgen.nr_x, pgen.nr_y, pgen.nr_z)
             
             # Denormalized
             v = v * dataset.venc 
