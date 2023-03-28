@@ -2,7 +2,8 @@ import tensorflow as tf
 import numpy as np
 import time
 import os
-from GANetwork.SR4DFlowGAN import SR4DFlowGAN
+# from GANetwork.SR4DFlowGAN import SR4DFlowGAN
+from GANetwork2D.SR4DFlowGAN import SR4DFlowGAN
 from Network.PatchGenerator import PatchGenerator
 from utils import prediction_utils
 from utils.ImageDataset import ImageDataset
@@ -29,20 +30,22 @@ def prepare_network(patch_size, res_increase, low_resblock, hi_resblock):
 
     # network & output
     net = SR4DFlowGAN(patch_size, res_increase)
-    generator = net.build_generator(low_resblock, hi_resblock, channel_nr=64)
-    discriminator = net.build_disriminator(channel_nr=32)
+    generator = net.build_generator(low_resblock, hi_resblock, channel_nr=96)
+    discriminator = net.build_disriminator(channel_nr=64)
     model = net.build_network(generator, discriminator)
 
     return model, generator
 
 if __name__ == '__main__':
     data_dir = '../../data/cerebro_data'
-    filename = 'patient3-postOp-0375_LR.h5'
+    filename = 'patient3-postOp_LR.h5'
  
-    output_dir = "../predictions/GAN_test2"
-    output_filename = 'patient3-postOp-0375_SR.h5'
+    output_dir = "../predictions/GAN_2D"
+    output_filename = 'patient3-postOp_SR.h5'
     
-    model_path = "../models/4DFlowGAN_20230306-2035/4DFlowGAN-best.h5"
+    model_path = "../models/4DFlowGAN_2D_20230227-1340/4DFlowGAN_2D-best.h5" #2D
+    # model_path = "../models/4DFlowGAN_20230304-1209/4DFlowGAN-best.h5"
+
     # Params
     patch_size = 12 #24
     res_increase = 2
@@ -51,7 +54,7 @@ if __name__ == '__main__':
 
     # Network
     low_resblock=8
-    hi_resblock=4
+    hi_resblock=6
 
     # Setting up
     input_filepath = '{}/{}'.format(data_dir, filename)

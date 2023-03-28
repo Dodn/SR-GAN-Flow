@@ -13,16 +13,6 @@ import os
 from .SR4DFlowGAN import SR4DFlowGAN
 from Network import utility, h5util, loss_utils
 
-cross_kernel = tf.constant(np.array([[[0,0,0],
-                                      [0,1,0],
-                                      [0,0,0]],
-                                     [[0,1,0],
-                                      [1,1,1],
-                                      [0,1,0]],
-                                     [[0,0,0],
-                                      [0,1,0],
-                                      [0,0,0]]]), dtype=tf.float32)
-
 class TrainerController:
     # constructor
     def __init__(self, patch_size, res_increase, initial_learning_rate=1e-4, quicksave_enable=True, network_name='4DFlowGAN', low_resblock=8, hi_resblock=4):
@@ -32,9 +22,7 @@ class TrainerController:
         """
         self.div_weight = 0 # Weighting for divergence loss
         self.non_fluid_weight = 1.0 # Weigthing for non fluid region
-        self.boundary_weight = 1.0
         self.disc_loss_weight = 0.00001
-        self.discL2weight = 500
 
         self.mask_for_disc = True # Apply mask to SR field before being passed to the discriminator
 
@@ -108,13 +96,6 @@ class TrainerController:
         non_fluid_mask = tf.cast(non_fluid_mask, dtype=tf.float32)
 
         epsilon = 1 # minimum 1 pixel
-
-        if self.boundary_weight != 1:
-            padded = tf.pad(mask, [[0,0],[1,1],[1,1],[1,1]], 'SYMMETRIC')
-            conved = tf.nn.conv3d(padded[..., tf.newaxis], cross_kernel[..., tf.newaxis, tf.newaxis], [1,1,1,1,1], 'VALID')
-            core_mask = tf.cast(tf.greater(conved[..., 0], tf.constant(6.5)), dtype=tf.float32)
-            boundary_mask = mask - core_mask
-            mask = core_mask + boundary_mask * self.boundary_weight
 
         fluid_mse = mse * mask
         fluid_mse = tf.reduce_sum(fluid_mse, axis=[1,2,3]) / (tf.reduce_sum(mask, axis=[1,2,3]) + epsilon)
@@ -221,7 +202,7 @@ class TrainerController:
 
         print("Copying source code to model directory...")
         # Copy all the source file to the model dir for backup
-        directory_to_backup = [".", "GANetwork"]
+        directory_to_backup = [".", "GANetworkU"]
         for directory in directory_to_backup:
             files = os.listdir(directory)
             for fname in files:
@@ -320,7 +301,7 @@ class TrainerController:
         disc_loss = adv_loss
         
         if metric_set == 'train':
-            l2_reg_loss = self.calculate_regularizer_loss(self.discriminator) * self.discL2weight
+            l2_reg_loss = self.calculate_regularizer_loss(self.discriminator) * 200
             self.loss_metrics[f'l2_disc_loss'].update_state(l2_reg_loss)
             disc_loss += l2_reg_loss
 
@@ -453,16 +434,13 @@ class TrainerController:
             opt_weights = pickle.load(f)
         
         # Get the model's trainable weights
-        grad_vars_gen = self.generator.trainable_weights
-        grad_vars_disc = self.discriminator.trainable_weights
+        grad_vars = self.model.trainable_weights
         # This need not be model.trainable_weights; it must be a correctly-ordered list of 
         # grad_vars corresponding to how you usually call the optimizer.
-        zero_grads_gen = [tf.zeros_like(w) for w in grad_vars_gen]
-        zero_grads_disc = [tf.zeros_like(w) for w in grad_vars_disc]
+        zero_grads = [tf.zeros_like(w) for w in grad_vars]
 
         # Apply gradients which don't do nothing with Adam
-        self.optimizer.apply_gradients(zip(zero_grads_disc, grad_vars_disc))
-        self.optimizer.apply_gradients(zip(zero_grads_gen, grad_vars_gen))
+        self.optimizer.apply_gradients(zip(zero_grads, grad_vars))
 
         # Set the weights of the optimizer
         self.optimizer.set_weights(opt_weights)

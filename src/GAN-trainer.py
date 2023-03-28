@@ -21,7 +21,7 @@ if __name__ == "__main__":
     
     restore = False
     if restore:
-        model_dir = "../models/4DFlowGAN"
+        model_dir = "../models/4DFlowGAN-U"
         model_file = "4DFlowGAN-best.h5"
 
     # Hyperparameters optimisation variables
