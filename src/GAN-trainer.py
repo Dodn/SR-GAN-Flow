@@ -1,27 +1,32 @@
 import numpy as np
 from Network.PatchHandler3D import PatchHandler3D
-from GANetwork.TrainerController import TrainerController
+from importlib import import_module
 
 def load_indexes(index_file):
-    """
-        Load patch index file (csv). This is the file that is used to load the patches based on x,y,z index
-    """
+    """Load patch index file (csv). This is the file that is used to load the patches based on x,y,z index"""
     indexes = np.genfromtxt(index_file, delimiter=',', skip_header=True, dtype='unicode') # 'unicode' or None
     return indexes
 
 if __name__ == "__main__":
+
+    ### ---------------- SETTINGS ----------------
+
+    #GAN_module_name = "GANetwork"
+    #GAN_module_name = "GANetworkU"
+    GAN_module_name = "GANetworkESR"
+    
     data_dir = '../../data/cerebro_data'
     
     # ---- Patch index files ----
     training_file = '{}/newtrain12.csv'.format(data_dir)
     validate_file = '{}/newval12.csv'.format(data_dir)
 
-    QUICKSAVE = False # True
-    benchmark_file = '{}/newbenchmark12.csv'.format(data_dir)
+    QUICKSAVE = False
+    benchmark_file = '{}/newbenchmark12.csv'.format(data_dir) # OPTIONAL. Only used as save criterion if QUICKSAVE=True
     
     restore = False
     if restore:
-        model_dir = "../models/4DFlowGAN-U"
+        model_dir = "../models/4DFlowGAN"
         model_file = "4DFlowGAN-best.h5"
 
     # Hyperparameters optimisation variables
@@ -31,12 +36,19 @@ if __name__ == "__main__":
     mask_threshold = 0.6 # def 0.6
 
     # Network setting
-    network_name = '4DFlowGAN'
-    patch_size = 12 # def 16
+    network_name = 'GAN-ESR'
+    patch_size = 12 # def 12
     res_increase = 2 # def 2
     # Residual blocks, default (8 LR ResBlocks and 4 HR ResBlocks)
     low_resblock = 8
     hi_resblock = 4
+
+    ### ------------------------------------------------
+
+
+
+    # Dynamic import of GAN module's trainer controller
+    TrainerController = import_module(GAN_module_name + '.TrainerController', 'src').TrainerController
 
     # Load data file and indexes
     trainset = load_indexes(training_file)

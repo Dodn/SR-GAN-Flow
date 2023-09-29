@@ -33,7 +33,7 @@ class TrainerController:
         self.div_weight = 0 # Weighting for divergence loss
         self.non_fluid_weight = 1.0 # Weigthing for non fluid region
         self.boundary_weight = 1.0
-        self.disc_loss_weight = 0.00001
+        self.disc_loss_weight = 0.001
         self.discL2weight = 500
 
         self.mask_for_disc = True # Apply mask to SR field before being passed to the discriminator
@@ -48,10 +48,9 @@ class TrainerController:
         self.network_name = network_name
 
         net = SR4DFlowGAN(patch_size, res_increase)
-        self.denoiser = net.build_denoiser()
         self.generator = net.build_generator(low_resblock, hi_resblock, channel_nr=64)
         self.discriminator = net.build_disriminator(channel_nr=32)
-        self.model = net.build_network(self.denoiser, self.generator, self.discriminator)
+        self.model = net.build_network(self.generator, self.discriminator)
 
         # ===== Metrics =====
         self.loss_metrics = dict([
@@ -69,10 +68,7 @@ class TrainerController:
             ('val_disc_loss', tf.keras.metrics.Mean(name='val_disc_loss')),
             ('train_disc_adv_loss', tf.keras.metrics.Mean(name='train_disc_adv_loss')),
             ('val_disc_adv_loss', tf.keras.metrics.Mean(name='val_disc_adv_loss')),
-            ('train_dn_loss', tf.keras.metrics.Mean(name='train_dn_loss')),
-            ('val_dn_loss', tf.keras.metrics.Mean(name='val_dn_loss')),
 
-            ('l2_dn_loss', tf.keras.metrics.Mean(name='l2_dn_loss')),
             ('l2_gen_loss', tf.keras.metrics.Mean(name='l2_gen_loss')),
             ('l2_disc_loss', tf.keras.metrics.Mean(name='l2_disc_loss')),
         ])
@@ -128,25 +124,11 @@ class TrainerController:
 
         mse = fluid_mse + non_fluid_mse * self.non_fluid_weight
 
-        # divergence
-        
-        # divergence_loss = loss_utils.calculate_divergence_loss2(u,v,w, u_pred,v_pred,w_pred)
-        # divergence_loss = self.div_weight * divergence_loss
-
-        # fluid_divloss = divergence_loss * mask
-        # fluid_divloss = tf.reduce_sum(fluid_divloss, axis=[1,2,3]) / (tf.reduce_sum(mask, axis=[1,2,3]) + epsilon)
-
-        # non_fluid_divloss = divergence_loss * non_fluid_mask
-        # non_fluid_divloss = tf.reduce_sum(non_fluid_divloss, axis=[1,2,3]) / (tf.reduce_sum(non_fluid_mask, axis=[1,2,3]) + epsilon)
-
-        # divergence_loss = fluid_divloss + non_fluid_divloss
-        divergence_loss = 0
-
         # standard without masking
-        total_loss = tf.reduce_mean(mse + divergence_loss)
+        total_loss = tf.reduce_mean(mse)
 
         # return all losses for logging
-        return  total_loss, mse, divergence_loss
+        return  total_loss, mse, 0
 
     def calculate_regularizer_loss(self, net=None):
         """
@@ -225,7 +207,7 @@ class TrainerController:
 
         print("Copying source code to model directory...")
         # Copy all the source file to the model dir for backup
-        directory_to_backup = [".", "GANetworkDN"]
+        directory_to_backup = [".", "GANetworkMSG"]
         for directory in directory_to_backup:
             files = os.listdir(directory)
             for fname in files:
@@ -239,31 +221,19 @@ class TrainerController:
     @tf.function
     def train_step(self, data_pairs):
         u,v,w, u_mag, v_mag, w_mag, u_hr,v_hr, w_hr, venc, mask = data_pairs
-        input_data = tf.concat([u,v,w], axis=-1)
         x_target = tf.concat((u_hr, v_hr, w_hr), axis=-1)
-        dn_target = tf.nn.avg_pool3d(x_target, (1,2,2,2,1), (1,2,2,2,1), 'VALID')
-
-        with tf.GradientTape() as dn_tape:
-            dn_pred = self.denoiser(input_data)
-
-            dn_loss = self.dn_calculate_and_update_metrics(dn_target, dn_pred, 'train')
-
-        # Get the gradients
-        dn_grads = dn_tape.gradient(dn_loss, self.denoiser.trainable_variables)
-        # Update the weights
-        self.optimizer.apply_gradients(zip(dn_grads, self.denoiser.trainable_variables))
 
         with tf.GradientTape() as gen_tape:
             # training=True is only needed if there are layers with different
             # behavior during training versus inference (e.g. Dropout).
-            
-            x_pred = self.generator(dn_pred, training=True)
+            input_data = tf.concat([u,v,w], axis=-1)
+            x_pred = self.generator(input_data, training=True)
             x_pred_p = x_pred * tf.expand_dims(mask, -1) if self.mask_for_disc else x_pred
 
             self.discriminator.trainable = True
             with tf.GradientTape() as disc_tape:
-                real_y_pred = self.discriminator(x_target, training=True)
-                fake_y_pred = self.discriminator(x_pred_p, training=True)
+                real_y_pred = self.discriminator([x_target, input_data], training=True)
+                fake_y_pred = self.discriminator([x_pred_p, input_data], training=True)
                 real_y_target = np.ones(fake_y_pred.shape)
                 fake_y_target = np.zeros(fake_y_pred.shape)
 
@@ -284,41 +254,25 @@ class TrainerController:
     @tf.function
     def test_step(self, data_pairs):
         u,v,w, u_mag, v_mag, w_mag, u_hr,v_hr, w_hr, venc, mask = data_pairs
+        x_target = tf.concat((u_hr, v_hr, w_hr), axis=-1)
         # training=False is only needed if there are layers with different
         # behavior during training versus inference (e.g. Dropout).
         input_data = tf.concat([u,v,w], axis=-1)
-        x_target = tf.concat((u_hr, v_hr, w_hr), axis=-1)
-        dn_target = tf.nn.avg_pool3d(x_target, (1,2,2,2,1), (1,2,2,2,1), 'VALID')
-
-        dn_pred = self.denoiser(input_data)
-        self.dn_calculate_and_update_metrics(dn_target, dn_pred, 'val')
-
-        x_pred = self.generator(dn_pred, training=False)
+        x_pred = self.generator(input_data, training=False)
         x_pred_p = x_pred * tf.expand_dims(mask, -1) if self.mask_for_disc else x_pred
-        fake_y_pred = self.discriminator(x_pred_p, training=False)
+        fake_y_pred = self.discriminator([x_pred_p, input_data], training=False)
 
         real_y_target = np.ones(fake_y_pred.shape)
         fake_y_target = np.zeros(fake_y_pred.shape)
 
-        real_y_pred = self.discriminator(x_target, training=False)
+        real_y_pred = self.discriminator([x_target, input_data], training=False)
 
-        self.disc_calculate_and_update_metrics(fake_y_target, fake_y_pred, real_y_target, real_y_pred, 'val')
+        disc_loss = self.disc_calculate_and_update_metrics(fake_y_target, fake_y_pred, real_y_target, real_y_pred, 'val')
+        self.loss_metrics['val_disc_loss'].update_state(disc_loss)
         
         self.gen_calculate_and_update_metrics(x_target, x_pred, real_y_target, fake_y_pred, mask, 'val')
        
         return x_pred
-    
-    def dn_calculate_and_update_metrics(self, target, pred, metric_set):
-        dn_loss = self.calculate_mse(target[...,0],target[...,1],target[...,2], pred[...,0],pred[...,1],pred[...,2])
-
-        if metric_set == 'train':
-            l2_reg_loss = self.calculate_regularizer_loss(self.denoiser)
-            self.loss_metrics[f'l2_dn_loss'].update_state(l2_reg_loss)
-            dn_loss += l2_reg_loss
-
-        self.loss_metrics[f'{metric_set}_dn_loss'].update_state(dn_loss)
-
-        return dn_loss
 
     def gen_calculate_and_update_metrics(self, hires, predictions, real_y_target, fake_y_pred, mask, metric_set):
         loss, mse, divloss = self.loss_function(hires, predictions, mask)

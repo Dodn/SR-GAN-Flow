@@ -2,52 +2,44 @@ import tensorflow as tf
 import numpy as np
 import time
 import os
-from Network.SR4DFlowNet import SR4DFlowNet
+
+from importlib import import_module
+
 from Network.PatchGenerator import PatchGenerator
 from utils import prediction_utils
 from utils.ImageDataset import ImageDataset
 
 
-def prepare_network(patch_size, res_increase, low_resblock, hi_resblock):
-    # Prepare input
-    input_shape = (patch_size,patch_size,patch_size,1)
-    output_shape = (res_increase*patch_size,res_increase*patch_size,res_increase*patch_size,1)
-
-    u = tf.keras.layers.Input(shape=input_shape, name='u')
-    v = tf.keras.layers.Input(shape=input_shape, name='v')
-    w = tf.keras.layers.Input(shape=input_shape, name='w')
-
-    u_mag = tf.keras.layers.Input(shape=input_shape, name='u_mag')
-    v_mag = tf.keras.layers.Input(shape=input_shape, name='v_mag')
-    w_mag = tf.keras.layers.Input(shape=input_shape, name='w_mag')
-
-    u_hr = tf.keras.layers.Input(shape=output_shape, name='u_hr')
-    v_hr = tf.keras.layers.Input(shape=output_shape, name='v_hr')
-    w_hr = tf.keras.layers.Input(shape=output_shape, name='w_hr')
-
-    input_layer = [u,v,w, u_mag, v_mag, w_mag]
+def prepare_network(SR4DFlowGAN, patch_size, res_increase, low_resblock, hi_resblock):
 
     # network & output
-    net = SR4DFlowNet(res_increase)
-    outs = net.build_network(u,v,w,u_mag,v_mag,w_mag)
-    model = tf.keras.Model(inputs=input_layer, outputs = outs, name='4DFlowNet')
+    net = SR4DFlowGAN(patch_size, res_increase)
+    generator = net.build_generator(low_resblock, hi_resblock, channel_nr=64)
+    discriminator = net.build_disriminator(channel_nr=32)
+    model = net.build_network(generator, discriminator)
 
-    return model
+    return model, generator
 
 if __name__ == '__main__':
-    # data_dir = '../../data/cerebro_data'
-    # filename = 'patient3-postOp_LR.h5'
- 
-    # output_dir = "../predictions/GAN_2D"
-    # output_filename = 'patient3-postOp_SR.h5'
 
-    data_dir = '../../data/BRAIN/Severe/ICAD33/h5'
-    filename = 'ICAD33_LR.h5'
+    # NOTE
+    # All architecure parameters must match those used during training for the stored weights to be loaded successfully.
+    # Relevant options are: patch size, res increase, low/hi resblocks, gen/disc channel count
+    # If unsure about the values used, check the backup_source of the saved model.
+
+    ### ---------------- SETTINGS ----------------
+
+    GAN_module_name = "GANetwork"
+    #GAN_module_name = "GANetworkU"
+    #GAN_module_name = "GANetworkESR"
+
+    data_dir = '../../data/cerebro_data'
+    filename = 'patient3-postOp_LR.h5'
  
-    output_dir = "../predictions/invivo/4DFlowNet/Severe"
-    output_filename = filename #'ICAD28.h5'
-    
-    model_path = "../models/4DFlowNet_20230504-1212/4DFlowNet-best.h5"
+    output_dir = "../predictions/GAN"
+    output_filename = 'patient3-postOp_SR.h5'
+
+    model_path = "../models/4DFlowGAN_20230504-1327/4DFlowGAN-best.h5"
 
     # Params
     patch_size = 12 #24
@@ -56,21 +48,27 @@ if __name__ == '__main__':
     round_small_values = True
 
     # Network
-    low_resblock=8
-    hi_resblock=4
+    low_resblock=4
+    hi_resblock=2
+
+    ### ------------------------------------------------
+
 
     # Setting up
     input_filepath = '{}/{}'.format(data_dir, filename)
     pgen = PatchGenerator(patch_size, res_increase)
-    dataset = ImageDataset()
+    dataset = ImageDataset(use_mag=False)
 
     # Check the number of rows in the file
     nr_rows = dataset.get_dataset_len(input_filepath)
     print(f"Number of rows in dataset: {nr_rows}")
 
-    print(f"Loading 4DFlowNet: {res_increase}x upsample")
+    # Dynamic import of GAN module's architecture 
+    SR4DFlowGAN = import_module(GAN_module_name + '.SR4DFlowGAN', 'src').SR4DFlowGAN
+
+    print(f"Loading {GAN_module_name}: {res_increase}x upsample")
     # Load the network
-    network = prepare_network(patch_size, res_increase, low_resblock, hi_resblock)
+    network, generator = prepare_network(SR4DFlowGAN, patch_size, res_increase, low_resblock, hi_resblock)
     network.load_weights(model_path)
 
     if not os.path.isdir(output_dir):
@@ -84,7 +82,7 @@ if __name__ == '__main__':
         dataset.load_vectorfield(input_filepath, nrow)
         print(f"Original image shape: {dataset.u.shape}")
         
-        velocities, magnitudes = pgen.patchify(dataset)
+        velocities, magnitudes = pgen.patchify(dataset, use_mag=False)
         data_size = len(velocities[0])
         print(f"Patchified. Nr of patches: {data_size} - {velocities[0].shape}")
 
@@ -97,13 +95,10 @@ if __name__ == '__main__':
             print(f"\rProcessed {current_idx}/{data_size} Elapsed: {time_taken:.2f} secs.", end='\r')
             # Prepare the batch to predict
             patch_index = np.index_exp[current_idx:current_idx+batch_size]
-            input_data = [velocities[0][patch_index],
-                        velocities[1][patch_index],
-                        velocities[2][patch_index],
-                        magnitudes[0][patch_index],
-                        magnitudes[1][patch_index],
-                        magnitudes[2][patch_index]]
-            sr_images = network.predict(input_data)
+            input_data = np.concatenate([velocities[0][patch_index],
+                                    velocities[1][patch_index],
+                                    velocities[2][patch_index]], axis=-1)
+            sr_images = generator.predict(input_data)
 
             results = np.append(results, sr_images, axis=0)
         # End of batch loop    

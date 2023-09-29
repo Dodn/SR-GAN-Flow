@@ -10,7 +10,7 @@ class PatchGenerator():
         # we make sure we pad it on the far side of x,y,z so the division will match
         self.padding = (0,0,0) 
 
-    def patchify(self, dataset: ImageDataset):
+    def patchify(self, dataset: ImageDataset, use_mag=True):
         """
             Create overlapping patch of size of patch_size
             On LR, we exclude 2 px from each side, effectively the size being used is patch_size-4
@@ -19,23 +19,28 @@ class PatchGenerator():
         u_stacks, i,j,k = self._generate_overlapping_patches(dataset.u)
         v_stacks, i,j,k = self._generate_overlapping_patches(dataset.v)
         w_stacks, i,j,k = self._generate_overlapping_patches(dataset.w)
-        umag_stacks, i,j,k = self._generate_overlapping_patches(dataset.mag_u)
-        vmag_stacks, i,j,k = self._generate_overlapping_patches(dataset.mag_v)
-        wmag_stacks, i,j,k = self._generate_overlapping_patches(dataset.mag_w)
+
+        u_stacks = np.expand_dims(u_stacks, -1)
+        v_stacks = np.expand_dims(v_stacks, -1)
+        w_stacks = np.expand_dims(w_stacks, -1)
+
+        umag_stacks = 0
+        vmag_stacks = 0
+        wmag_stacks = 0
+
+        if use_mag:
+            umag_stacks, i,j,k = self._generate_overlapping_patches(dataset.mag_u)
+            vmag_stacks, i,j,k = self._generate_overlapping_patches(dataset.mag_v)
+            wmag_stacks, i,j,k = self._generate_overlapping_patches(dataset.mag_w)
+
+            umag_stacks = np.expand_dims(umag_stacks, -1)
+            vmag_stacks = np.expand_dims(vmag_stacks, -1)
+            wmag_stacks = np.expand_dims(wmag_stacks, -1)
         
         # Store this info for unpatchify
         self.nr_x = i
         self.nr_y = j
         self.nr_z = k
-        
-        # Expand dims for tf.keras input shape
-        u_stacks = np.expand_dims(u_stacks, -1)
-        v_stacks = np.expand_dims(v_stacks, -1)
-        w_stacks = np.expand_dims(w_stacks, -1)
-
-        umag_stacks = np.expand_dims(umag_stacks, -1)
-        vmag_stacks = np.expand_dims(vmag_stacks, -1)
-        wmag_stacks = np.expand_dims(wmag_stacks, -1)
 
         return (u_stacks, v_stacks, w_stacks), (umag_stacks, vmag_stacks, wmag_stacks)
     

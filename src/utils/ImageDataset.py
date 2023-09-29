@@ -2,11 +2,12 @@ import h5py
 import numpy as np
 
 class ImageDataset():
-    def __init__(self):
+    def __init__(self, use_mag=True):
         self.velocity_colnames   = ['u', 'v', 'w']
         self.venc_colnames = ['venc_u', 'venc_v', 'venc_w']
         self.mag_colnames  = ['mag_u', 'mag_v', 'mag_w']
         self.dx_colname = 'dx'
+        self.use_mag = use_mag
 
     def _set_images(self, velocity_images, mag_images, venc, dx):
         '''
@@ -21,9 +22,9 @@ class ImageDataset():
         self.v = velocity_images[1].astype('float32')
         self.w = velocity_images[2].astype('float32')
         
-        self.mag_u = mag_images[0].astype('float32')
-        self.mag_v = mag_images[1].astype('float32')
-        self.mag_w = mag_images[2].astype('float32')
+        self.mag_u = mag_images[0].astype('float32') if self.use_mag else None
+        self.mag_v = mag_images[1].astype('float32') if self.use_mag else None
+        self.mag_w = mag_images[2].astype('float32') if self.use_mag else None
 
         # Keep the venc to denormalized data
         self.venc = venc.astype('float32')
@@ -66,16 +67,18 @@ class ImageDataset():
             
             for i in range(len(self.velocity_colnames)):                
                 w = np.asarray(hl.get(self.velocity_colnames[i])[idx])
-                mag_w = np.asarray(hl.get(self.mag_colnames[i])[idx])
-                w_venc = np.asarray(hl.get(self.venc_colnames[i])[idx])
-            
+                
                 # add them to the list
                 lowres_images.append(w)
-                mag_images.append(mag_w)
-                vencs.append(w_venc)
+
+                if self.use_mag:
+                    mag_w = np.asarray(hl.get(self.mag_colnames[i])[idx])
+                    #w_venc = np.asarray(hl.get(self.venc_colnames[i])[idx])
+                    mag_images.append(mag_w)
+                    #vencs.append(w_venc)
 
         # /end of u,v,w loop
-        global_venc = np.max(vencs)
+        global_venc = np.asarray(1.0) #np.max(vencs) if self.use_mag else np.asarray(1.0)
         
         # Convert to numpy array
         lowres_images = np.asarray(lowres_images)

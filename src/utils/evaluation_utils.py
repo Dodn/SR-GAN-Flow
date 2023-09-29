@@ -127,8 +127,8 @@ def _plot_linear_regression(fig_nr, dimension, boundary_hr_vals, boundary_sr_val
     xlim = ylim = 1.0
     plt.xlim(-xlim,xlim); plt.ylim(-ylim,ylim); plt.xticks([-xlim, xlim]); plt.yticks([-ylim, ylim])
     
-    plt.scatter(core_hr_vals, core_sr_vals, s=0.8, c=["black"])
-    plt.scatter(boundary_hr_vals, boundary_sr_vals, s=0.2, c=["red"])
+    plt.scatter(core_hr_vals[::5], core_sr_vals[::5], s=0.8, c=["black"])
+    plt.scatter(boundary_hr_vals[::5], boundary_sr_vals[::5], s=0.2, c=["red"])
     
     boundary_reg_stats = _reg_stats(boundary_hr_vals, boundary_sr_vals)
     plt.text(-xlim/2, ylim/2, boundary_reg_stats, horizontalalignment='center', verticalalignment='bottom', fontsize=10, color='red')
@@ -149,14 +149,14 @@ def _create_boundary_and_core_masks(binary_mask, cut_off, cut_off_type='voxels')
     else:
         raise ValueError("Invalid cut_off_type, choose 'voxels' or 'percentage'")
     
-    core_mask = morphology.binary_erosion(binary_mask, selem)
+    core_mask = 1.0-morphology.binary_dilation(1.0-binary_mask, selem)
     boundary_mask = np.logical_xor(binary_mask, core_mask)
     return boundary_mask.astype(np.int32), core_mask.astype(np.int32)
 
 def _sample_hrsr(ground_truth_file, prediction_file, mask, peak_flow_idx, ratio):
     # Use mask to find interesting samples
     sample_pot = np.where(mask == 1)
-    rng = np.random.default_rng()
+    rng = np.random.default_rng(123)
 
     # Sample <ratio> samples
     sample_idx = rng.choice(len(sample_pot[0]), replace=False, size=(int(len(sample_pot[0])*ratio)))
@@ -193,7 +193,7 @@ def draw_reg_line(ground_truth_file, prediction_file, peak_flow_idx, binary_mask
     # Parameters
     #
     fig_nr += 1
-    ratio = 0.1
+    ratio = 1.0 #0.1
     
     boundary_mask, core_mask = _create_boundary_and_core_masks(binary_mask, 0.1, 'voxels',) 
     
@@ -222,7 +222,7 @@ def check_and_normalize(img):
         return (img - np.min(img))/(np.max(img) - np.min(img))
 
 
-def generate_gif_volume(img3D, axis = 0, save_as = "animation", norm=True):
+def generate_gif_volume(img3D, axis = 0, save_as = "animation", norm=True, format='GIF', scaling=1):
     # check that input is 3 dimensional suc that normalization is correct
     img3D = img3D.squeeze()
     assert len(img3D.shape) == 3
@@ -243,7 +243,81 @@ def generate_gif_volume(img3D, axis = 0, save_as = "animation", norm=True):
         frames = [Image.fromarray(img3D[:, :, i, :], 'RGB') for i in range(img3D.shape[2])]
     else: 
         print("Invalid axis input.")
+
+    if scaling != 1:
+        w, h = frames[0].size
+        frames = [f.resize((w*scaling, h*scaling), resample=Image.BOX) for f in frames]
     
     frame_one = frames[0]
-    frame_one.save(save_as+".gif", format="GIF", append_images=frames, save_all=True, duration=100, loop=0)
+    if format == 'GIF':
+        frame_one.save(save_as+".gif", format="GIF", append_images=frames, save_all=True, duration=100, loop=0)
+    else:
+        frame_one.save(save_as+".png", format="PNG")
 
+
+def calculate_absolute_error(u_pred, v_pred, w_pred, u_hi, v_hi, w_hi, mask=None):
+    u_diff = np.square(u_pred - u_hi)
+    v_diff = np.square(v_pred - v_hi)
+    w_diff = np.square(w_pred - w_hi)
+
+    diff_speed = np.sqrt(u_diff + v_diff + w_diff)
+
+    abs_err = np.sum(diff_speed*mask) / (np.sum(mask) + 1) if mask is not None else np.mean(diff_speed)
+    return abs_err
+
+def calculate_relative_error(u_pred, v_pred, w_pred, u_hi, v_hi, w_hi, binary_mask):
+    # if epsilon is set to 0, we will get nan and inf
+    epsilon = 1e-5
+
+    u_diff = np.square(u_pred - u_hi)
+    v_diff = np.square(v_pred - v_hi)
+    w_diff = np.square(w_pred - w_hi)
+
+    diff_speed = np.sqrt(u_diff + v_diff + w_diff)
+    actual_speed = np.sqrt(np.square(u_hi) + np.square(v_hi) + np.square(w_hi)) 
+
+    # actual speed can be 0, resulting in inf
+    relative_speed_loss = diff_speed / (actual_speed + epsilon)
+    
+    # Make sure the range is between 0 and 1
+    relative_speed_loss = np.clip(relative_speed_loss, 0., 1.)
+
+    # Apply correction, only use the diff speed if actual speed is zero
+    condition = np.not_equal(actual_speed, 0.)
+    corrected_speed_loss = np.where(condition, relative_speed_loss, diff_speed)
+
+    multiplier = 1e4 # round it so we don't get any infinitesimal number
+    corrected_speed_loss = np.round(corrected_speed_loss * multiplier) / multiplier
+    # print(corrected_speed_loss)
+    
+    # Apply mask
+    # binary_mask_condition = (mask > threshold)
+    binary_mask_condition = np.equal(binary_mask, 1.0)          
+    corrected_speed_loss = np.where(binary_mask_condition, corrected_speed_loss, np.zeros_like(corrected_speed_loss))
+    # print(found_indexes)
+
+    # Calculate the mean from the total non zero accuracy, divided by the masked area
+    # reduce first to the 'batch' axis
+    mean_err = np.sum(corrected_speed_loss) / (np.sum(binary_mask) + 1) 
+
+    # now take the actual mean
+    # mean_err = tf.reduce_mean(mean_err) * 100 # in percentage
+    mean_err = mean_err * 100
+
+    return mean_err
+
+def calculate_rmse(u_pred, v_pred, w_pred, u_hi, v_hi, w_hi, mask=None):
+    u_diff = np.square(u_pred - u_hi)
+    v_diff = np.square(v_pred - v_hi)
+    w_diff = np.square(w_pred - w_hi)
+
+    diff_speed = u_diff + v_diff + w_diff
+
+    mse = np.sum(diff_speed*mask) / (np.sum(mask)) if mask is not None else np.mean(diff_speed)
+    return np.sqrt(mse)
+
+def linreg(sr, hr, mask):
+    hr_vals = hr[mask > 0.5]
+    sr_vals = sr[mask > 0.5]
+    reg = stats.linregress(hr_vals, sr_vals)
+    return reg.slope, reg.intercept, reg.rvalue**2
